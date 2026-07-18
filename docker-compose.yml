@@ -1,0 +1,83 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cnpj-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-cnpj_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cnpj_password}
+      POSTGRES_DB: ${DB_NAME:-cnpj_finder_pro}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cnpj-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: cnpj-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cnpj-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: cnpj-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD:-changeme}
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - cnpj-network
+
+  api:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.api
+    container_name: cnpj-api
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${DB_USER:-cnpj_user}:${DB_PASSWORD:-cnpj_password}@postgres:5432/${DB_NAME:-cnpj_finder_pro}
+      REDIS_HOST: redis
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+    networks:
+      - cnpj-network
+
+  web:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    container_name: cnpj-web
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - cnpj-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+
+networks:
+  cnpj-network:
+    driver: bridge

@@ -1,1 +1,64 @@
-/**\n * Encryption Utilities\n * Secure data encryption and decryption using AES-256-GCM\n */\n\nimport crypto from 'crypto';\nimport CryptoJS from 'crypto-js';\n\nconst ALGORITHM = 'aes-256-gcm';\nconst KEY_LENGTH = 32; // 256 bits\nconst IV_LENGTH = 16; // 128 bits\nconst TAG_LENGTH = 16; // 128 bits\nconst SALT_LENGTH = 64; // 512 bits\n\n/**\n * Encrypt sensitive data using AES-256-GCM\n * @param plaintext - Data to encrypt\n * @param key - Encryption key (will be hashed if needed)\n * @returns Encrypted data with IV and authentication tag\n */\nexport function encryptData(plaintext: string, key?: string): string {\n  try {\n    const encryptionKey = key || process.env.REACT_APP_ENCRYPTION_KEY!;\n    \n    // Generate IV (Initialization Vector)\n    const iv = crypto.randomBytes(IV_LENGTH);\n    \n    // Derive key from password\n    const derivedKey = crypto\n      .pbkdf2Sync(encryptionKey, Buffer.alloc(0), 100000, KEY_LENGTH, 'sha256');\n    \n    // Create cipher\n    const cipher = crypto.createCipheriv(ALGORITHM, derivedKey, iv);\n    \n    // Encrypt data\n    let encrypted = cipher.update(plaintext, 'utf8', 'hex');\n    encrypted += cipher.final('hex');\n    \n    // Get authentication tag\n    const authTag = cipher.getAuthTag();\n    \n    // Combine: IV + authTag + encrypted data\n    const result = iv.toString('hex') + authTag.toString('hex') + encrypted;\n    \n    return result;\n  } catch (error) {\n    console.error('Encryption error:', error);\n    throw new Error('Failed to encrypt data');\n  }\n}\n\n/**\n * Decrypt data encrypted with encryptData\n * @param ciphertext - Encrypted data\n * @param key - Decryption key\n * @returns Decrypted plaintext\n */\nexport function decryptData(ciphertext: string, key?: string): string {\n  try {\n    const encryptionKey = key || process.env.REACT_APP_ENCRYPTION_KEY!;\n    \n    // Extract IV and authentication tag\n    const iv = Buffer.from(ciphertext.slice(0, IV_LENGTH * 2), 'hex');\n    const authTag = Buffer.from(\n      ciphertext.slice(IV_LENGTH * 2, IV_LENGTH * 2 + TAG_LENGTH * 2),\n      'hex'\n    );\n    const encrypted = ciphertext.slice(IV_LENGTH * 2 + TAG_LENGTH * 2);\n    \n    // Derive key from password\n    const derivedKey = crypto\n      .pbkdf2Sync(encryptionKey, Buffer.alloc(0), 100000, KEY_LENGTH, 'sha256');\n    \n    // Create decipher\n    const decipher = crypto.createDecipheriv(ALGORITHM, derivedKey, iv);\n    decipher.setAuthTag(authTag);\n    \n    // Decrypt data\n    let decrypted = decipher.update(encrypted, 'hex', 'utf8');\n    decrypted += decipher.final('utf8');\n    \n    return decrypted;\n  } catch (error) {\n    console.error('Decryption error:', error);\n    throw new Error('Failed to decrypt data');\n  }\n}\n\n/**\n * Hash password using bcryptjs algorithm\n * @param password - Password to hash\n * @returns Hashed password\n */\nexport function hashPassword(password: string): string {\n  try {\n    const salt = crypto.randomBytes(16);\n    const iterations = 100000;\n    const hash = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512');\n    \n    // Format: iterations$salt$hash\n    return (\n      iterations +\n      '$' +\n      salt.toString('hex') +\n      '$' +\n      hash.toString('hex')\n    );\n  } catch (error) {\n    console.error('Password hashing error:', error);\n    throw new Error('Failed to hash password');\n  }\n}\n\n/**\n * Verify password against hash\n * @param password - Password to verify\n * @param hash - Hashed password\n * @returns True if password matches\n */\nexport function verifyPassword(password: string, hash: string): boolean {\n  try {\n    const [iterations, salt, key] = hash.split('$');\n    const hashBuffer = Buffer.from(key, 'hex');\n    const computedHash = crypto.pbkdf2Sync(\n      password,\n      Buffer.from(salt, 'hex'),\n      parseInt(iterations, 10),\n      64,\n      'sha512'\n    );\n    \n    return crypto.timingSafeEqual(hashBuffer, computedHash);\n  } catch (error) {\n    return false;\n  }\n}\n\n/**\n * Generate secure random token\n * @param length - Token length in bytes\n * @returns Random hex token\n */\nexport function generateSecureToken(length: number = 32): string {\n  return crypto.randomBytes(length).toString('hex');\n}\n\n/**\n * Hash data using SHA-256\n * @param data - Data to hash\n * @returns SHA-256 hash hex string\n */\nexport function hashSHA256(data: string): string {\n  return crypto.createHash('sha256').update(data).digest('hex');\n}\n\n/**\n * Generate HMAC for data validation\n * @param data - Data to create HMAC for\n * @param secret - Secret key\n * @returns HMAC hex string\n */\nexport function generateHMAC(data: string, secret?: string): string {\n  const key = secret || process.env.REACT_APP_AUTH_SECRET!;\n  return crypto\n    .createHmac('sha256', key)\n    .update(data)\n    .digest('hex');\n}\n\n/**\n * Verify HMAC\n * @param data - Original data\n * @param hmac - HMAC to verify\n * @param secret - Secret key\n * @returns True if HMAC is valid\n */\nexport function verifyHMAC(\n  data: string,\n  hmac: string,\n  secret?: string\n): boolean {\n  const key = secret || process.env.REACT_APP_AUTH_SECRET!;\n  const computed = crypto\n    .createHmac('sha256', key)\n    .update(data)\n    .digest('hex');\n  \n  return crypto.timingSafeEqual(\n    Buffer.from(computed),\n    Buffer.from(hmac)\n  );\n}\n\n/**\n * Encrypt JSON object\n * @param obj - Object to encrypt\n * @param key - Encryption key\n * @returns Encrypted JSON string\n */\nexport function encryptJSON<T>(obj: T, key?: string): string {\n  const json = JSON.stringify(obj);\n  return encryptData(json, key);\n}\n\n/**\n * Decrypt JSON object\n * @param encrypted - Encrypted JSON string\n * @param key - Decryption key\n * @returns Decrypted object\n */\nexport function decryptJSON<T>(encrypted: string, key?: string): T {\n  const json = decryptData(encrypted, key);\n  return JSON.parse(json) as T;\n}\n\n/**\n * Sanitize sensitive data for logging\n * @param data - Data to sanitize\n * @param fieldsToMask - Fields to mask (default: common sensitive fields)\n * @returns Sanitized data\n */\nexport function sanitizeForLogging(\n  data: Record<string, any>,\n  fieldsToMask: string[] = [\n    'password',\n    'token',\n    'secret',\n    'apiKey',\n    'creditCard',\n    'ssn',\n  ]\n): Record<string, any> {\n  const sanitized = { ...data };\n  \n  fieldsToMask.forEach((field) => {\n    if (field in sanitized) {\n      sanitized[field] = '***REDACTED***';\n    }\n  });\n  \n  return sanitized;\n}\n\n/**\n * Generate encryption key from password\n * @param password - Master password\n * @returns 32-byte encryption key\n */\nexport function deriveKeyFromPassword(password: string): Buffer {\n  return crypto.pbkdf2Sync(password, Buffer.alloc(0), 100000, KEY_LENGTH, 'sha256');\n}\n\n/**\n * Validate encryption key strength\n * @param key - Key to validate\n * @returns True if key meets minimum requirements\n */\nexport function isValidEncryptionKey(key: string): boolean {\n  if (!key || typeof key !== 'string') return false;\n  if (key.length < 32) return false;\n  \n  // Check for good character diversity\n  const hasUpperCase = /[A-Z]/.test(key);\n  const hasLowerCase = /[a-z]/.test(key);\n  const hasNumbers = /\\d/.test(key);\n  const hasSpecialChars = /[!@#$%^&*]/.test(key);\n  \n  return hasUpperCase && hasLowerCase && hasNumbers && hasSpecialChars;\n}\n"
+import crypto from 'crypto';
+
+export function encryptData(plaintext: string, key?: string): string {
+  try {
+    const encryptionKey = key || process.env.REACT_APP_ENCRYPTION_KEY!;
+    const iv = crypto.randomBytes(16);
+    const derivedKey = crypto.pbkdf2Sync(encryptionKey, Buffer.alloc(0), 100000, 32, 'sha256');
+    const cipher = crypto.createCipheriv('aes-256-gcm', derivedKey, iv);
+    
+    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag();
+    
+    return iv.toString('hex') + authTag.toString('hex') + encrypted;
+  } catch (error) {
+    throw new Error('Failed to encrypt data');
+  }
+}
+
+export function decryptData(ciphertext: string, key?: string): string {
+  try {
+    const encryptionKey = key || process.env.REACT_APP_ENCRYPTION_KEY!;
+    const iv = Buffer.from(ciphertext.slice(0, 32), 'hex');
+    const authTag = Buffer.from(ciphertext.slice(32, 64), 'hex');
+    const encrypted = ciphertext.slice(64);
+    const derivedKey = crypto.pbkdf2Sync(encryptionKey, Buffer.alloc(0), 100000, 32, 'sha256');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', derivedKey, iv);
+    decipher.setAuthTag(authTag);
+    
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (error) {
+    throw new Error('Failed to decrypt data');
+  }
+}
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const iterations = 100000;
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512');
+  return iterations + '$' + salt.toString('hex') + '$' + hash.toString('hex');
+}
+
+export function verifyPassword(password: string, hash: string): boolean {
+  try {
+    const [iterations, salt, key] = hash.split('$');
+    const hashBuffer = Buffer.from(key, 'hex');
+    const computedHash = crypto.pbkdf2Sync(
+      password,
+      Buffer.from(salt, 'hex'),
+      parseInt(iterations, 10),
+      64,
+      'sha512'
+    );
+    return crypto.timingSafeEqual(hashBuffer, computedHash);
+  } catch {
+    return false;
+  }
+}
+
+export function generateSecureToken(length: number = 32): string {
+  return crypto.randomBytes(length).toString('hex');
+}
